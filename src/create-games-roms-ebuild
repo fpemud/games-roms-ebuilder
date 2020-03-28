@@ -1,0 +1,100 @@
+#!/usr/bin/python3
+
+import os
+import io
+import gzip
+import lxml
+import time
+import certifi
+import urllib.request
+import selenium.common
+import selenium.webdriver
+
+
+dir = "/var/lib/portage/overlay-fpemud/roms-nes"
+
+pn = input("Enter rom dir name: ")
+romId = input("Enter rom id: ")
+webSite = input("Enter web site(1-romhustler.org, 2-romsmania.cc): ")
+
+realUrl = None
+downloadedFile = None
+if webSite == "1":
+    options = selenium.webdriver.chrome.options.Options()
+#    options.add_argument('--headless')
+    options.add_argument('--no-sandbox')
+    options.add_argument("download.default_directory=%s" % (os.getcwd()))
+    driver = selenium.webdriver.Chrome(options=options)
+
+    driver.get("http://romhustler.org/rom/nes/%s" % (romId))
+
+    try:
+        atag = driver.find_element_by_xpath("//div[contains(text(), \"download is disabled\")]")
+        raise Exception("download is disabled")
+    except selenium.common.exceptions.NoSuchElementException:
+        pass
+
+    romName = driver.find_element_by_xpath("//h1[@itemprop=\"name\"]").text
+
+    driver.find_element_by_link_text("Click here to download this rom").click()
+
+    while True:
+        time.sleep(1)
+        try:
+            atag = driver.find_element_by_link_text("here")
+            break
+        except selenium.common.exceptions.NoSuchElementException:
+            pass
+    atag.click()
+
+    driver.get("chrome://downloads")
+    while True:
+        time.sleep(1)
+        try:
+            # get downloaded percentage
+            downloadPercentage = driver.execute_script("return document.querySelector('downloads-manager').shadowRoot.querySelector('#downloadsList downloads-item').shadowRoot.querySelector('#progress').value")
+            # check if downloadPercentage is 100 (otherwise the script will keep waiting)
+            if downloadPercentage == 100:
+                # return the file name once the download is completed
+                realUrl = driver.execute_script("return document.querySelector('downloads-manager').shadowRoot.querySelector('#downloadsList downloads-item').shadowRoot.querySelector('div#content  #file-link').href")
+                downloadedFile = driver.execute_script("return document.querySelector('downloads-manager').shadowRoot.querySelector('#downloadsList downloads-item').shadowRoot.querySelector('div#content  #file-link').text")
+                break
+        except:
+            pass
+
+    print(realUrl)
+    print(downloadedFile)
+
+elif webSite == "2":
+    assert False
+
+else:
+    assert False
+
+print(downloadedFile)
+
+
+buf = ""
+buf += "# Copyright 1999-2015 Gentoo Foundation\n"
+buf += "# Distributed under the terms of the GNU General Public License v2\n"
+buf += "# $Id$\n"
+buf += "\n"
+buf += "EAPI=6\n"
+buf += "\n"
+if webSite == "1":
+    buf += "EROM_SITE='romhustler.org'\n"
+elif webSite == "2":
+    buf += "EROM_SITE='romsmania.cc'\n"
+else:
+    assert False
+buf += "EROM_ID='%s'\n" % (romId)
+buf += "EROM_NAME='%s'\n" % (romName)
+buf += "inherit nes-rom\n"
+buf += "\n"
+buf += "SRC_URI=\"%s -> ${PN}.zip\"\n" % (realUrl)
+buf += "LICENSE=\"unknown\"\n"
+
+dir = os.path.join(dir, pn)
+os.makedirs(dir)
+with open(os.path.join(dir, pn + "-0.ebuild"), "w") as f:
+    f.write(buf)
