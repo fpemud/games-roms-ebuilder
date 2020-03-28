@@ -1,43 +1,106 @@
 #!/usr/bin/python3
 
 import os
-import io
-import gzip
-import lxml
+import sys
 import time
-import certifi
-import urllib.request
+import subprocess
 import selenium.common
 import selenium.webdriver
 
 
-dir = "/var/lib/portage/overlay-fpemud/roms-nes"
+ROM_TYPE_LIST = ["nes", "mame"]
+WEBSITE_LIST = ["romhustler.org", "romsmania.cc"]
 
-pn = input("Enter rom dir name: ")
-romId = input("Enter rom id: ")
-webSite = input("Enter web site(1-romhustler.org, 2-romsmania.cc): ")
 
-realUrl = None
-downloadedFile = None
-if webSite == "1":
+class _Util:
+
+    @staticmethod
+    def seleniumGotoDownloadManagerAndWaitUntilDownloadComplete(seleniumDriver):
+        # Returns (download-url, downloaded-filename)
+
+        seleniumDriver.get("chrome://downloads")
+        while True:
+            time.sleep(1)
+            try:
+                # get downloaded percentage
+                downloadPercentage = seleniumDriver.execute_script("return document.querySelector('downloads-manager').shadowRoot.querySelector('#downloadsList downloads-item').shadowRoot.querySelector('#progress').value")
+                # check if downloadPercentage is 100 (otherwise the script will keep waiting)
+                if downloadPercentage == 100:
+                    # return the file name once the download is completed
+                    realUrl = seleniumDriver.execute_script("return document.querySelector('downloads-manager').shadowRoot.querySelector('#downloadsList downloads-item').shadowRoot.querySelector('div#content  #file-link').href")
+                    downloadedFile = seleniumDriver.execute_script("return document.querySelector('downloads-manager').shadowRoot.querySelector('#downloadsList downloads-item').shadowRoot.querySelector('div#content  #file-link').text")
+                    break
+            except Exception:
+                pass
+        return (realUrl, downloadedFile)
+
+
+class TempChdir:
+
+    def __init__(self, dirname):
+        self.olddir = os.getcwd()
+        os.chdir(dirname)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, traceback):
+        os.chdir(self.olddir)
+
+
+def usage():
+    print("Usage: create-games-roms-ebuild <rom-type> <website> <rom-id> <ebuild-directory>")
+    print("")
+    print("       rom-type: %s" % (", ".join(ROM_TYPE_LIST)))
+    print("       website: %s" % (", ".join(WEBSITE_LIST)))
+
+
+def parseArguments():
+    romType = sys.argv[1]
+    if romType in ["-h", "--help"]:
+        usage()
+        sys.exit(0)
+    if romType not in ROM_TYPE_LIST:
+        raise Exception("invalid rom-type")
+
+    webSite = sys.argv[2]
+    if webSite not in WEBSITE_LIST:
+        raise Exception("invalid website")
+
+    romId = sys.argv[3]
+
+    ebuildDir = sys.argv[4]
+    if os.path.exists(ebuildDir):
+        raise Exception("ebuild directory already exists")
+
+    return (romType, webSite, romId, ebuildDir)
+
+
+def getRomInfoForWebSite1(romType, romId):
+    """Returns (rom-name, direct-download-url, local-file)"""
+
+    # load selenium driver
     options = selenium.webdriver.chrome.options.Options()
-#    options.add_argument('--headless')
+    options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument("download.default_directory=%s" % (os.getcwd()))
     driver = selenium.webdriver.Chrome(options=options)
 
-    driver.get("http://romhustler.org/rom/nes/%s" % (romId))
+    # load rom page
+    driver.get("http://romhustler.org/rom/%s/%s" % (romType, romId))
 
+    # check if we can download this rom
     try:
         atag = driver.find_element_by_xpath("//div[contains(text(), \"download is disabled\")]")
         raise Exception("download is disabled")
     except selenium.common.exceptions.NoSuchElementException:
         pass
 
+    # get rom-name
     romName = driver.find_element_by_xpath("//h1[@itemprop=\"name\"]").text
 
+    # load download page, click to download
     driver.find_element_by_link_text("Click here to download this rom").click()
-
     while True:
         time.sleep(1)
         try:
@@ -46,55 +109,56 @@ if webSite == "1":
         except selenium.common.exceptions.NoSuchElementException:
             pass
     atag.click()
+    realUrl, downloadedFile = _Util.seleniumGotoDownloadManagerAndWaitUntilDownloadComplete(driver)
 
-    driver.get("chrome://downloads")
-    while True:
-        time.sleep(1)
-        try:
-            # get downloaded percentage
-            downloadPercentage = driver.execute_script("return document.querySelector('downloads-manager').shadowRoot.querySelector('#downloadsList downloads-item').shadowRoot.querySelector('#progress').value")
-            # check if downloadPercentage is 100 (otherwise the script will keep waiting)
-            if downloadPercentage == 100:
-                # return the file name once the download is completed
-                realUrl = driver.execute_script("return document.querySelector('downloads-manager').shadowRoot.querySelector('#downloadsList downloads-item').shadowRoot.querySelector('div#content  #file-link').href")
-                downloadedFile = driver.execute_script("return document.querySelector('downloads-manager').shadowRoot.querySelector('#downloadsList downloads-item').shadowRoot.querySelector('div#content  #file-link').text")
-                break
-        except:
-            pass
+    return (romName, realUrl, downloadedFile)
 
-    print(realUrl)
-    print(downloadedFile)
 
-elif webSite == "2":
+def getRomInfoForWebSite2(romType, romId):
     assert False
 
-else:
-    assert False
 
-print(downloadedFile)
+def generateEbuildDir(romType, webSite, romId, romName, downloadUrl, ebuildDir):
+    # generate file content
+    buf = ""
+    buf += "# Copyright 1999-2015 Gentoo Foundation\n"
+    buf += "# Distributed under the terms of the GNU General Public License v2\n"
+    buf += "# $Id$\n"
+    buf += "\n"
+    buf += "EAPI=6\n"
+    buf += "\n"
+    buf += "EROM_SITE='%s'\n" % (webSite)
+    buf += "EROM_ID='%s'\n" % (romId)
+    buf += "EROM_NAME='%s'\n" % (romName)
+    if romType == "nes":
+        buf += "inherit nes-rom\n"
+    elif romType == "mame":
+        buf += "inherit mame-rom\n"
+    else:
+        assert False
+    buf += "\n"
+    buf += "SRC_URI=\"%s -> ${PN}.zip\"\n" % (downloadUrl)
+    buf += "LICENSE=\"unknown\"\n"
+
+    # create ebuild file
+    ebuildFile = os.path.basename(ebuildDir) + "-0.ebuild"
+    os.mkdir(ebuildDir)
+    with open(os.path.join(ebuildDir, ebuildFile), "w") as f:
+        f.write(buf)
+
+    # create manifest file
+    with TempChdir(ebuildDir):
+        subprocess.run(["/usr/bin/ebuild", ebuildFile, "manifest"], check=True)
 
 
-buf = ""
-buf += "# Copyright 1999-2015 Gentoo Foundation\n"
-buf += "# Distributed under the terms of the GNU General Public License v2\n"
-buf += "# $Id$\n"
-buf += "\n"
-buf += "EAPI=6\n"
-buf += "\n"
-if webSite == "1":
-    buf += "EROM_SITE='romhustler.org'\n"
-elif webSite == "2":
-    buf += "EROM_SITE='romsmania.cc'\n"
-else:
-    assert False
-buf += "EROM_ID='%s'\n" % (romId)
-buf += "EROM_NAME='%s'\n" % (romName)
-buf += "inherit nes-rom\n"
-buf += "\n"
-buf += "SRC_URI=\"%s -> ${PN}.zip\"\n" % (realUrl)
-buf += "LICENSE=\"unknown\"\n"
+if __name__ == "__main__":
+    romType, webSite, romId, ebuildDir = parseArguments()
 
-dir = os.path.join(dir, pn)
-os.makedirs(dir)
-with open(os.path.join(dir, pn + "-0.ebuild"), "w") as f:
-    f.write(buf)
+    if webSite == WEBSITE_LIST[0]:
+        romName, url, filename = getRomInfoForWebSite1(romType, romId)
+    elif webSite == WEBSITE_LIST[1]:
+        romName, url, filename = getRomInfoForWebSite2(romType, romId)
+    else:
+        assert False
+
+    generateEbuildDir(romType, webSite, romId, romName, url, ebuildDir)
