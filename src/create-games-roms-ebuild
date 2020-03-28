@@ -49,6 +49,9 @@ class TempChdir:
 
 
 def usage():
+    global ROM_TYPE_LIST
+    global WEBSITE_LIST
+
     print("Usage: create-games-roms-ebuild <rom-type> <website> <rom-id> <ebuild-directory>")
     print("")
     print("       rom-type: %s" % (", ".join(ROM_TYPE_LIST)))
@@ -56,6 +59,9 @@ def usage():
 
 
 def parseArguments():
+    global ROM_TYPE_LIST
+    global WEBSITE_LIST
+    
     romType = sys.argv[1]
     if romType in ["-h", "--help"]:
         usage()
