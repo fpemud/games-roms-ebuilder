@@ -124,6 +124,11 @@ def getRomInfoForWebSite2(romType, romId):
     assert False
 
 
+def getMainFileForNesRomArchive(filename):
+    assert False
+
+
+
 def generateEbuildDir(romType, webSite, romId, romName, downloadUrl, ebuildDir):
     # generate file content
     buf = ""
