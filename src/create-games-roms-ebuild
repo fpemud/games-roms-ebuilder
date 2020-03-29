@@ -61,7 +61,7 @@ def usage():
 def parseArguments():
     global ROM_TYPE_LIST
     global WEBSITE_LIST
-    
+
     romType = sys.argv[1]
     if romType in ["-h", "--help"]:
         usage()
@@ -82,6 +82,10 @@ def parseArguments():
     return (romType, webSite, romId, ebuildDir)
 
 
+def showProgress(stage, message):
+    print("Progress: %s, %s" % (stage, message))
+
+
 def getRomInfoForWebSite1(romType, romId):
     """Returns (rom-name, direct-download-url, local-file)"""
 
@@ -91,9 +95,12 @@ def getRomInfoForWebSite1(romType, romId):
     options.add_argument('--no-sandbox')
     options.add_argument("download.default_directory=%s" % (os.getcwd()))
     driver = selenium.webdriver.Chrome(options=options)
+    showProgress("Selenium driver loaded.")
 
     # load rom page
-    driver.get("http://romhustler.org/rom/%s/%s" % (romType, romId))
+    url = "http://romhustler.org/rom/%s/%s" % (romType, romId)
+    driver.get(url)
+    showProgress("Target page (%s) loaded." % (url))
 
     # check if we can download this rom
     try:
@@ -104,6 +111,7 @@ def getRomInfoForWebSite1(romType, romId):
 
     # get rom-name
     romName = driver.find_element_by_xpath("//h1[@itemprop=\"name\"]").text
+    showProgress("ROM name (%s) parsed." % (romName))
 
     # load download page, click to download
     driver.find_element_by_link_text("Click here to download this rom").click()
@@ -115,7 +123,10 @@ def getRomInfoForWebSite1(romType, romId):
         except selenium.common.exceptions.NoSuchElementException:
             pass
     atag.click()
+    showProgress("ROM download started.")
+
     realUrl, downloadedFile = _Util.seleniumGotoDownloadManagerAndWaitUntilDownloadComplete(driver)
+    showProgress("ROM download completed.")
 
     return (romName, realUrl, downloadedFile)
 
@@ -126,7 +137,6 @@ def getRomInfoForWebSite2(romType, romId):
 
 def getMainFileForNesRomArchive(filename):
     assert False
-
 
 
 def generateEbuildDir(romType, webSite, romId, romName, downloadUrl, ebuildDir):
@@ -173,3 +183,4 @@ if __name__ == "__main__":
         assert False
 
     generateEbuildDir(romType, webSite, romId, romName, url, ebuildDir)
+    showProgress("Ebuild directory (%s) created." % (ebuildDir))
