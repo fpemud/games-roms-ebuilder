@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import libarchive
 import subprocess
 import selenium.common
 import selenium.webdriver

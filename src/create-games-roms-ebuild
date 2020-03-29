@@ -3,7 +3,7 @@
 
 
 def usage():
-    print("Usage: create-games-roms-ebuild <rom-type> <website> <rom-id> <ebuild-directory>")
+    print("Usage: create-games-roms-ebuild <rom-type> <website> <rom-id> <ebuild-directory> <distfile-directory>")
     print("")
     print("       rom-type: %s" % (", ".join(Const.ROM_TYPE_LIST)))
     print("       website: %s" % (", ".join(Const.WEBSITE_LIST)))
@@ -27,21 +27,42 @@ def parseArguments():
     if os.path.exists(ebuildDir):
         raise Exception("ebuild directory already exists")
 
+    distfilesDir = sys.argv[5]
+
     if "--debug" in sys.argv:
         isDebug = True
     else:
         isDebug = False
 
-    return (romType, webSite, romId, ebuildDir, isDebug)
-
-
+    return (romType, webSite, romId, ebuildDir, distfilesDir, isDebug)
 
 
 def getMainFileForNesRomArchive(filename):
-    assert False
+    fnList = []
+    with libarchive.file_reader(filename) as archive:
+        for entry in archive:
+            fn = str(entry)
+            if fn.endswith(".nes"):
+                fnList.append(fn)
+
+    if len(fnList) == 0:
+        raise Exception("no rom file(s) in archive %s" % (filename))
+
+    if len(fnList) == 1:
+        return None
+
+    for fn in fnList:
+        if "[!]" in fn:
+            return fn
+
+    for fn in fnList:
+        if "(U)" in fn:
+            return fn
+
+    return fnList[0]
 
 
-def generateEbuildDir(romType, webSite, compressFormat, romId, romName, downloadUrl, ebuildDir):
+def generateEbuildDir(romType, webSite, compressFormat, romId, romName, downloadUrl, mainRomFile, ebuildDir):
     # generate file content
     buf = ""
     buf += "# Copyright 1999-2015 Gentoo Foundation\n"
@@ -53,6 +74,8 @@ def generateEbuildDir(romType, webSite, compressFormat, romId, romName, download
     buf += "EROM_SITE='%s'\n" % (webSite)
     buf += "EROM_ID='%s'\n" % (romId)
     buf += "EROM_NAME='%s'\n" % (romName)
+    if mainRomFile is not None:
+        buf += "EROM_MAIN_FILE='%s'\n" % (mainRomFile)
     if romType == "nes":
         buf += "inherit nes-rom\n"
     elif romType == "mame":
@@ -75,7 +98,7 @@ def generateEbuildDir(romType, webSite, compressFormat, romId, romName, download
 
 
 if __name__ == "__main__":
-    romType, webSite, romId, ebuildDir, isDebug = parseArguments()
+    romType, webSite, romId, ebuildDir, distfilesDir, isDebug = parseArguments()
 
     if webSite == Const.WEBSITE_LIST[0]:
         romName, url, filename = getRomInfoForWebSite1(romType, romId, isDebug)
@@ -86,5 +109,7 @@ if __name__ == "__main__":
     else:
         assert False
 
-    generateEbuildDir(romType, webSite, compressFormat, romId, romName, url, ebuildDir)
+    subprocess.run(["/bin/cp", filename, os.path.join(distfilesDir, "%s.%s" % (os.path.basename(ebuildDir), compressFormat))])
+    mainFile = getMainFileForNesRomArchive(filename)
+    generateEbuildDir(romType, webSite, compressFormat, romId, romName, url, mainFile, ebuildDir)
     showProgress("Ebuild directory (%s) created." % (ebuildDir))
