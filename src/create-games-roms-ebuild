@@ -1,6 +1,5 @@
 #!/usr/bin/python3
-
-## include-point ##
+##include-point##
 
 
 def usage():
