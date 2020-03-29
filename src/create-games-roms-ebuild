@@ -15,15 +15,21 @@ WEBSITE_LIST = ["romhustler.org", "romsmania.cc"]
 class _Util:
 
     @staticmethod
-    def seleniumGotoDownloadManagerAndWaitUntilDownloadComplete(seleniumDriver):
+    def seleniumGotoDownloadManagerAndWaitUntilDownloadComplete(seleniumDriver, progressFunc=None):
         # Returns (download-url, downloaded-filename)
 
         seleniumDriver.get("chrome://downloads")
+        lastPercentage = -1
         while True:
             time.sleep(1)
             try:
                 # get downloaded percentage
                 downloadPercentage = seleniumDriver.execute_script("return document.querySelector('downloads-manager').shadowRoot.querySelector('#downloadsList downloads-item').shadowRoot.querySelector('#progress').value")
+                # report progress
+                if downloadPercentage != lastPercentage:
+                    if progressFunc is not None:
+                        progressFunc(downloadPercentage)
+                    lastPercentage = downloadPercentage
                 # check if downloadPercentage is 100 (otherwise the script will keep waiting)
                 if downloadPercentage == 100:
                     # return the file name once the download is completed
@@ -79,19 +85,29 @@ def parseArguments():
     if os.path.exists(ebuildDir):
         raise Exception("ebuild directory already exists")
 
-    return (romType, webSite, romId, ebuildDir)
+    if "--debug" in sys.argv:
+        isDebug = True
+    else:
+        isDebug = False
+
+    return (romType, webSite, romId, ebuildDir, isDebug)
 
 
-def showProgress(stage, message):
-    print("Progress: %s, %s" % (stage, message))
+def showProgress(message):
+    print("Progress: %s" % (message))
 
 
-def getRomInfoForWebSite1(romType, romId):
+def romDownloadProgressCallback(progress):
+    showProgress("ROM download progress %d%%" % (progress))
+
+
+def getRomInfoForWebSite1(romType, romId, isDebug):
     """Returns (rom-name, direct-download-url, local-file)"""
 
     # load selenium driver
     options = selenium.webdriver.chrome.options.Options()
-    options.add_argument('--headless')
+    if not isDebug:
+        options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument("download.default_directory=%s" % (os.getcwd()))
     driver = selenium.webdriver.Chrome(options=options)
@@ -125,7 +141,7 @@ def getRomInfoForWebSite1(romType, romId):
     atag.click()
     showProgress("ROM download started.")
 
-    realUrl, downloadedFile = _Util.seleniumGotoDownloadManagerAndWaitUntilDownloadComplete(driver)
+    realUrl, downloadedFile = _Util.seleniumGotoDownloadManagerAndWaitUntilDownloadComplete(driver, romDownloadProgressCallback)
     showProgress("ROM download completed.")
 
     return (romName, realUrl, downloadedFile)
@@ -139,7 +155,7 @@ def getMainFileForNesRomArchive(filename):
     assert False
 
 
-def generateEbuildDir(romType, webSite, romId, romName, downloadUrl, ebuildDir):
+def generateEbuildDir(romType, webSite, compressFormat, romId, romName, downloadUrl, ebuildDir):
     # generate file content
     buf = ""
     buf += "# Copyright 1999-2015 Gentoo Foundation\n"
@@ -158,7 +174,7 @@ def generateEbuildDir(romType, webSite, romId, romName, downloadUrl, ebuildDir):
     else:
         assert False
     buf += "\n"
-    buf += "SRC_URI=\"%s -> ${PN}.zip\"\n" % (downloadUrl)
+    buf += "SRC_URI=\"%s -> ${PN}.%s\"\n" % (downloadUrl, compressFormat)
     buf += "LICENSE=\"unknown\"\n"
 
     # create ebuild file
@@ -173,14 +189,16 @@ def generateEbuildDir(romType, webSite, romId, romName, downloadUrl, ebuildDir):
 
 
 if __name__ == "__main__":
-    romType, webSite, romId, ebuildDir = parseArguments()
+    romType, webSite, romId, ebuildDir, isDebug = parseArguments()
 
     if webSite == WEBSITE_LIST[0]:
-        romName, url, filename = getRomInfoForWebSite1(romType, romId)
+        romName, url, filename = getRomInfoForWebSite1(romType, romId, isDebug)
+        compressFormat = "7z"
     elif webSite == WEBSITE_LIST[1]:
-        romName, url, filename = getRomInfoForWebSite2(romType, romId)
+        romName, url, filename = getRomInfoForWebSite2(romType, romId, isDebug)
+        compressFormat = "zip"
     else:
         assert False
 
-    generateEbuildDir(romType, webSite, romId, romName, url, ebuildDir)
+    generateEbuildDir(romType, webSite, compressFormat, romId, romName, url, ebuildDir)
     showProgress("Ebuild directory (%s) created." % (ebuildDir))
