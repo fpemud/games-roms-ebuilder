@@ -1,0 +1,58 @@
+#!/usr/bin/python3
+
+## include-point ##
+
+
+def usage():
+    print("Usage: check-games-roms-ebuild <ebuild-directory>")
+
+
+def parseArguments():
+    ebuildDir = sys.argv[1]
+    if not os.path.exists(ebuildDir):
+        raise Exception("ebuild directory does not exist")
+
+    if "--auto-fix" in sys.argv:
+        bAutoFix = True
+    else:
+        bAutoFix = False
+
+    return (ebuildDir, bAutoFix)
+
+
+def readEbuildFile(ebuildDir):
+    global WEBSITE_LIST
+
+    fn = os.path.basename(ebuildDir)
+    buf = Util.readFile(fn)
+
+    # parse webSite
+    m = re.search("EROM_SITE='.*'", buf, re.M)
+    if m is None:
+        raise Exception("no EROM_SITE variable defined")
+    webSite = m.group(1)
+    if webSite not in WEBSITE_LIST:
+        raise Exception("invalid EROM_SITE variable")
+
+    # parse romId
+    m = re.search("EROMID=['\"](.*)['\"]", buf, re.M)
+    if m is None:
+        raise Exception("no EROMID variable defined")
+    romId = m.group(1)
+
+    # parse downloadUrl
+    m = re.search("SRC_URI=\"(.*)( -> .*)?\"", buf, re.M)
+    if m is None:
+        raise Exception("invalid SRC_URI variable")
+    downloadUrl = m.group(1)
+
+    return (webSite, romId, downloadUrl)
+
+
+
+if __name__ == "__main__":
+    ebuildDir, bAutoFix = parseArguments()
+    webSite, romId, downloadUrl = readEbuildFile(ebuildDir)
+
+
+
